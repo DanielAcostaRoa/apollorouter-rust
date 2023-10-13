@@ -1,0 +1,17 @@
+[package]
+name = "acme_router"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.75"
+apollo-router = "1.32.0"
+async-trait = "0.1.73"
+futures = "0.3.28"
+http = "0.2.9"
+schemars = "0.8.15"
+serde = "1.0.189"
+serde_json = "1.0.107"
+tokio = "1.33.0"
+tower = { version = "0.4.13", features = ["full"] }
+tracing = "0.1"

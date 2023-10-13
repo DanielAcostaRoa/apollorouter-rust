@@ -1,0 +1,13 @@
+version: '3.9'
+services:
+  apollo-router-rust-plugin:
+    container_name: apollo-router-rust-plugin
+    build: .
+    volumes:
+      - ./supergraph.graphql:/dist/schema/supergraph.graphql
+      - ./router.yaml:/dist/config/router.yaml
+    command: [ "--dev", "-c", "config/router.yaml", "-s", "schema/supergraph.graphql", "--log", "info" ]
+    environment:
+      - APOLLO_OTEL_EXPORTER_HOST=collector
+    ports:
+      - "4000:4000"
