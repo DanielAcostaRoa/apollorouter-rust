@@ -1,0 +1,14 @@
+cors:
+  allow_any_origin: true
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /graphql
+  introspection: true
+include_subgraph_errors:
+  all: true
+sandbox:
+  enabled: true
+plugins:
+  example.allow_client_id_from_file:
+    header: "x-client-id"
+    path: "allowedClientIds.json"
