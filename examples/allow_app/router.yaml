@@ -1,0 +1,19 @@
+cors:
+  allow_any_origin: true
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /graphql
+  introspection: true
+include_subgraph_errors:
+  all: true
+sandbox:
+  enabled: true
+headers:
+  all:
+    request:
+      - propagate:
+          matching: .*
+plugins:
+  apps.allow_app:
+    header: "app-token"
+    path: "allowedApps.json"
