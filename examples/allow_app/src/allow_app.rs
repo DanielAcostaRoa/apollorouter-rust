@@ -10,7 +10,6 @@ use apollo_router::services::supergraph;
 use http::StatusCode;
 use http::HeaderValue;
 use schemars::JsonSchema;
-use serde_json_bytes::Value;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -27,6 +26,7 @@ struct AllowAppConfig {
 struct AppConfig {
     id: String,
     nombre: String,
+    queries: Vec<String>,
 }
 
 struct AllowApp {
@@ -61,7 +61,6 @@ impl Plugin for AllowApp {
                     let ops: Vec<&str> = query_string.split('{').collect();
                     let op1: Vec<&str> = ops[1].split('(').collect();
                     let operation_name = &op1[0].replace(|c: char| !c.is_alphanumeric(), "");
-                    println!("Operation Name: {}", operation_name);
 
                     if !req.supergraph_request.headers().contains_key(&header_key) {
                         res = Some(
@@ -98,9 +97,37 @@ impl Plugin for AllowApp {
                                     )
                                     .unwrap();
                                 if let Some(app) = apps.iter().find(|app| app.id == app_id) {
-                                    req.supergraph_request
-                                        .headers_mut()
-                                        .insert("scope", HeaderValue::from_str(app.nombre).unwrap());
+                                    let query_is_allowed = app.queries
+                                        .iter()
+                                        .any(|query| query == operation_name);
+                                    if query_is_allowed {
+                                        req.supergraph_request
+                                            .headers_mut()
+                                            .insert(
+                                                "appName",
+                                                HeaderValue::from_str(&app.nombre).unwrap()
+                                            );
+                                    } else {
+                                        res = Some(
+                                            supergraph::Response
+                                                ::error_builder()
+                                                .error(
+                                                    graphql::Error
+                                                        ::builder()
+                                                        .message(
+                                                            format!(
+                                                                "No tienes permisos para ejecutar esta acción"
+                                                            )
+                                                        )
+                                                        .extension_code("UNAUTHORIZED")
+                                                        .build()
+                                                )
+                                                .status_code(StatusCode::FORBIDDEN)
+                                                .context(req.context.clone())
+                                                .build()
+                                                .expect("response is valid")
+                                        );
+                                    }
                                 } else {
                                     res = Some(
                                         supergraph::Response
