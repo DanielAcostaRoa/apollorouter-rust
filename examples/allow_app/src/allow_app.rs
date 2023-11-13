@@ -1,7 +1,6 @@
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 
-use apollo_router::graphql;
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -16,6 +15,9 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use acme_router::plugin_functions::validate_operation;
+use acme_router::plugin_functions::error_response;
+
 #[derive(Deserialize, JsonSchema)]
 struct AllowAppConfig {
     header: String,
@@ -26,14 +28,6 @@ struct AllowAppConfig {
 struct Payload {
     _id: String,
     iss: String,
-}
-
-#[warn(dead_code)]
-#[derive(Deserialize, JsonSchema, Debug, Clone)]
-struct AppConfig {
-    id: String,
-    nombre: String,
-    queries: Vec<String>,
 }
 
 struct AllowApp {
@@ -68,24 +62,11 @@ impl Plugin for AllowApp {
                 Some(query_string) => {
                     // First it is checked if the request has the Authorization header
                     if !req.supergraph_request.headers().contains_key(&header_key) {
-                        res = Some(
-                            supergraph::Response
-                                ::error_builder()
-                                .error(
-                                    graphql::Error
-                                        ::builder()
-                                        .message(
-                                            format!(
-                                                "No se ha recibido el encabezado '{header_key}'"
-                                            )
-                                        )
-                                        .extension_code("AUTH_ERROR")
-                                        .build()
-                                )
-                                .status_code(StatusCode::UNAUTHORIZED)
-                                .context(req.context.clone())
-                                .build()
-                                .expect("response is valid")
+                        res = error_response(
+                            "No se ha recibido el encabezado" + header_key,
+                            StatusCode::UNAUTHORIZED,
+                            "AUTH_ERROR",
+                            &req
                         );
                     } else {
                         // Get token from the Authorization header
@@ -97,45 +78,30 @@ impl Plugin for AllowApp {
 
                         match token {
                             Ok(token) => {
-                                let tokenBase64: Vec<&str> = token.split('.').collect();
+                                let token_base_64: Vec<&str> = token.split('.').collect();
 
-                                match decode(tokenBase64[1]) {
+                                // Decode payload from jwt
+                                match decode(token_base_64[1]) {
                                     Ok(decoded_bytes) => {
                                         let payload = String::from_utf8(decoded_bytes).expect(
                                             "Error al validar access Token"
                                         );
 
+                                        // Cast to Payload
                                         if
-                                            let Ok(payloadStrct) = serde_json::from_str::<Payload>(
+                                            let Ok(payload_data) = serde_json::from_str::<Payload>(
                                                 &payload
                                             )
                                         {
-                                            let app_id = payloadStrct.iss;
-
-                                            //Get query to execute
-                                            let ops: Vec<&str> = query_string.split('{').collect();
-                                            let op1: Vec<&str> = ops[1].split('(').collect();
-                                            let operation_name = &op1[0].replace(
-                                                |c: char| !c.is_alphanumeric(),
-                                                ""
+                                            // Validate query to execute
+                                            let valid_query = validate_operation(
+                                                &payload_data.iss,
+                                                query_string,
+                                                file_path.clone()
                                             );
-                                            let apps: Vec<AppConfig> = serde_json
-                                                ::from_str(
-                                                    std::fs
-                                                        ::read_to_string(file_path.clone())
-                                                        .unwrap()
-                                                        .as_str()
-                                                )
-                                                .unwrap();
-                                            if
-                                                let Some(app) = apps
-                                                    .iter()
-                                                    .find(|app| app.id == app_id)
-                                            {
-                                                let query_is_allowed = app.queries
-                                                    .iter()
-                                                    .any(|query| query == operation_name);
-                                                if query_is_allowed {
+
+                                            match valid_query {
+                                                Ok(app) => {
                                                     req.supergraph_request
                                                         .headers_mut()
                                                         .insert(
@@ -144,126 +110,52 @@ impl Plugin for AllowApp {
                                                                 &app.nombre
                                                             ).unwrap()
                                                         );
-                                                } else {
-                                                    res = Some(
-                                                        supergraph::Response
-                                                            ::error_builder()
-                                                            .error(
-                                                                graphql::Error
-                                                                    ::builder()
-                                                                    .message(
-                                                                        format!(
-                                                                            "No tienes permisos para ejecutar esta acción"
-                                                                        )
-                                                                    )
-                                                                    .extension_code("UNAUTHORIZED")
-                                                                    .build()
-                                                            )
-                                                            .status_code(StatusCode::FORBIDDEN)
-                                                            .context(req.context.clone())
-                                                            .build()
-                                                            .expect("response is valid")
+                                                }
+                                                Err(err) => {
+                                                    res = error_response(
+                                                        err,
+                                                        StatusCode::UNAUTHORIZED,
+                                                        "UNAUTHORIZED",
+                                                        &req
                                                     );
                                                 }
-                                            } else {
-                                                res = Some(
-                                                    supergraph::Response
-                                                        ::error_builder()
-                                                        .error(
-                                                            graphql::Error
-                                                                ::builder()
-                                                                .message(
-                                                                    format!(
-                                                                        "Aplicación no registrada"
-                                                                    )
-                                                                )
-                                                                .extension_code("BAD_CLIENT_ID")
-                                                                .build()
-                                                        )
-                                                        .status_code(StatusCode::BAD_REQUEST)
-                                                        .context(req.context.clone())
-                                                        .build()
-                                                        .expect("response is valid")
-                                                );
                                             }
                                         } else {
-                                            res = Some(
-                                                supergraph::Response
-                                                    ::error_builder()
-                                                    .error(
-                                                        graphql::Error
-                                                            ::builder()
-                                                            .message(
-                                                                format!(
-                                                                    "Error al validar access Token"
-                                                                )
-                                                            )
-                                                            .extension_code("UNAUTHORIZED")
-                                                            .build()
-                                                    )
-                                                    .status_code(StatusCode::FORBIDDEN)
-                                                    .context(req.context.clone())
-                                                    .build()
-                                                    .expect("response is valid")
+                                            res = error_response(
+                                                "Error al validar access Token",
+                                                StatusCode::UNAUTHORIZED,
+                                                "UNAUTHORIZED",
+                                                &req
                                             );
                                         }
                                     }
-                                    Err(err) => {
-                                        res = Some(
-                                            supergraph::Response
-                                                ::error_builder()
-                                                .error(
-                                                    graphql::Error
-                                                        ::builder()
-                                                        .message(
-                                                            format!("Error al validar access Token")
-                                                        )
-                                                        .extension_code("UNAUTHORIZED")
-                                                        .build()
-                                                )
-                                                .status_code(StatusCode::UNAUTHORIZED)
-                                                .context(req.context.clone())
-                                                .build()
-                                                .expect("response is valid")
+                                    Err(_err) => {
+                                        res = error_response(
+                                            "Error al validar access Token",
+                                            StatusCode::UNAUTHORIZED,
+                                            "UNAUTHORIZED",
+                                            &req
                                         );
                                     }
                                 }
                             }
-                            Err(err) => {
-                                res = Some(
-                                    supergraph::Response
-                                        ::error_builder()
-                                        .error(
-                                            graphql::Error
-                                                ::builder()
-                                                .message(format!("Error al obtener access Token"))
-                                                .extension_code("UNAUTHORIZED")
-                                                .build()
-                                        )
-                                        .status_code(StatusCode::UNAUTHORIZED)
-                                        .context(req.context.clone())
-                                        .build()
-                                        .expect("response is valid")
+                            Err(_err) => {
+                                res = error_response(
+                                    "Error al validar access Token",
+                                    StatusCode::UNAUTHORIZED,
+                                    "UNAUTHORIZED",
+                                    &req
                                 );
                             }
                         }
                     }
                 }
                 None => {
-                    res = Some(
-                        supergraph::Response
-                            ::error_builder()
-                            .error(
-                                graphql::Error
-                                    ::builder()
-                                    .message(format!("Query is not present"))
-                                    .extension_code("GRAPHQL_ERROR")
-                                    .build()
-                            )
-                            .status_code(StatusCode::BAD_REQUEST)
-                            .context(req.context.clone())
-                            .build()
-                            .expect("response is valid")
+                    res = error_response(
+                        "Query is not present",
+                        StatusCode::BAD_REQUEST,
+                        "GRAPHQL_ERROR",
+                        &req
                     );
                 }
             }

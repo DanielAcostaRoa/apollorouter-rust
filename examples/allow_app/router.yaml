@@ -15,5 +15,5 @@ headers:
           matching: .*
 plugins:
   apps.allow_app:
-    header: "app-token"
+    header: "Authorization"
     path: "allowedApps.json"
