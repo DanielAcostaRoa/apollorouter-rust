@@ -1,0 +1,14 @@
+---
+'1233':
+  id: '1233'
+  nombre: app2-Name
+  queries:
+  - panda
+  - allPandas
+'1234':
+  id: '1234'
+  nombre: app1-Name
+  queries:
+  - product
+  - allProduct
+  - review
