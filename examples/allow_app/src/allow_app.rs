@@ -2,13 +2,12 @@ use std::ops::ControlFlow;
 use std::path::PathBuf;
 
 use apollo_router::layers::ServiceBuilderExt;
-use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
+use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 use http::StatusCode;
 use http::HeaderValue;
-use base64::decode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -17,17 +16,12 @@ use tower::ServiceExt;
 
 use acme_router::plugin_functions::validate_operation;
 use acme_router::plugin_functions::error_response;
+use acme_router::plugin_functions::get_payload;
 
 #[derive(Deserialize, JsonSchema)]
 struct AllowAppConfig {
     header: String,
     path: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct Payload {
-    _id: String,
-    iss: String,
 }
 
 struct AllowApp {
@@ -63,7 +57,7 @@ impl Plugin for AllowApp {
                     // First it is checked if the request has the Authorization header
                     if !req.supergraph_request.headers().contains_key(&header_key) {
                         res = error_response(
-                            "No se ha recibido el encabezado" + header_key,
+                            "No se ha recibido el encabezado de autorización",
                             StatusCode::UNAUTHORIZED,
                             "AUTH_ERROR",
                             &req
@@ -78,65 +72,55 @@ impl Plugin for AllowApp {
 
                         match token {
                             Ok(token) => {
-                                let token_base_64: Vec<&str> = token.split('.').collect();
-
-                                // Decode payload from jwt
-                                match decode(token_base_64[1]) {
-                                    Ok(decoded_bytes) => {
-                                        let payload = String::from_utf8(decoded_bytes).expect(
-                                            "Error al validar access Token"
-                                        );
-
-                                        // Cast to Payload
+                                //Get token Payload
+                                if let Ok(app_payload) = get_payload(token) {
+                                    //Get token Payload 2
+                                    if let Ok(token_payload) = get_payload(&app_payload._id) {
+                                        // Validate query to execute
                                         if
-                                            let Ok(payload_data) = serde_json::from_str::<Payload>(
-                                                &payload
-                                            )
-                                        {
-                                            // Validate query to execute
-                                            let valid_query = validate_operation(
-                                                &payload_data.iss,
+                                            let Ok(app) = validate_operation(
+                                                &app_payload.iss,
                                                 query_string,
                                                 file_path.clone()
-                                            );
-
-                                            match valid_query {
-                                                Ok(app) => {
-                                                    req.supergraph_request
-                                                        .headers_mut()
-                                                        .insert(
-                                                            "appName",
-                                                            HeaderValue::from_str(
-                                                                &app.nombre
-                                                            ).unwrap()
-                                                        );
-                                                }
-                                                Err(err) => {
-                                                    res = error_response(
-                                                        err,
-                                                        StatusCode::UNAUTHORIZED,
-                                                        "UNAUTHORIZED",
-                                                        &req
-                                                    );
-                                                }
-                                            }
+                                            )
+                                        {
+                                            req.supergraph_request
+                                                .headers_mut()
+                                                .insert(
+                                                    "app_name",
+                                                    HeaderValue::from_str(&app.nombre).unwrap()
+                                                );
+                                            req.supergraph_request
+                                                .headers_mut()
+                                                .insert(
+                                                    "user_id",
+                                                    HeaderValue::from_str(
+                                                        &token_payload._id
+                                                    ).unwrap()
+                                                );
                                         } else {
                                             res = error_response(
-                                                "Error al validar access Token",
+                                                "Error al obtener access Token",
                                                 StatusCode::UNAUTHORIZED,
                                                 "UNAUTHORIZED",
                                                 &req
                                             );
                                         }
-                                    }
-                                    Err(_err) => {
+                                    } else {
                                         res = error_response(
-                                            "Error al validar access Token",
+                                            "Error al obtener access Token",
                                             StatusCode::UNAUTHORIZED,
                                             "UNAUTHORIZED",
                                             &req
                                         );
                                     }
+                                } else {
+                                    res = error_response(
+                                        "Error al obtener access Token",
+                                        StatusCode::UNAUTHORIZED,
+                                        "UNAUTHORIZED",
+                                        &req
+                                    );
                                 }
                             }
                             Err(_err) => {
