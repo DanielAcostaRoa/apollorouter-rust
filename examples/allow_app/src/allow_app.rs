@@ -74,38 +74,45 @@ impl Plugin for AllowApp {
                             Ok(token) => {
                                 //Get token Payload
                                 if let Ok(app_payload) = get_payload(token) {
-                                    //Get token Payload 2
-                                    if let Ok(token_payload) = get_payload(&app_payload._id) {
-                                        // Validate query to execute
-                                        if
-                                            let Ok(app) = validate_operation(
-                                                &app_payload.iss,
-                                                query_string,
-                                                file_path.clone()
-                                            )
-                                        {
+                                    // Validate query to execute
+                                    let validated_app = validate_operation(
+                                        &app_payload.iss,
+                                        query_string,
+                                        file_path.clone()
+                                    );
+                                    match validated_app {
+                                        Ok(app) => {
                                             req.supergraph_request
                                                 .headers_mut()
                                                 .insert(
                                                     "app_name",
                                                     HeaderValue::from_str(&app.nombre).unwrap()
                                                 );
-                                            req.supergraph_request
-                                                .headers_mut()
-                                                .insert(
-                                                    "user_id",
-                                                    HeaderValue::from_str(
-                                                        &token_payload._id
-                                                    ).unwrap()
-                                                );
-                                        } else {
+                                        }
+                                        Err(err) => {
                                             res = error_response(
-                                                "Error al obtener access Token",
+                                                err,
                                                 StatusCode::UNAUTHORIZED,
                                                 "UNAUTHORIZED",
                                                 &req
                                             );
                                         }
+                                    }
+                                    //Get token Payload 2
+                                    if let Ok(token_payload) = get_payload(&app_payload._id) {
+                                        req.supergraph_request
+                                            .headers_mut()
+                                            .insert(
+                                                "authorization",
+                                                HeaderValue::from_str(&app_payload._id).unwrap()
+                                            );
+
+                                        req.supergraph_request
+                                            .headers_mut()
+                                            .insert(
+                                                "user_id",
+                                                HeaderValue::from_str(&token_payload._id).unwrap()
+                                            );
                                     } else {
                                         res = error_response(
                                             "Error al obtener access Token",
@@ -116,7 +123,7 @@ impl Plugin for AllowApp {
                                     }
                                 } else {
                                     res = error_response(
-                                        "Error al obtener access Token",
+                                        "Error al obtener app Token",
                                         StatusCode::UNAUTHORIZED,
                                         "UNAUTHORIZED",
                                         &req
