@@ -73,61 +73,51 @@ impl Plugin for AllowApp {
                         match token {
                             Ok(token) => {
                                 //Get token Payload
-                                if let Ok(app_payload) = get_payload(token) {
-                                    // Validate query to execute
-                                    let validated_app = validate_operation(
-                                        &app_payload.iss,
-                                        query_string,
-                                        file_path.clone()
-                                    );
-                                    match validated_app {
-                                        Ok(app) => {
-                                            req.supergraph_request
-                                                .headers_mut()
-                                                .insert(
-                                                    "app_name",
-                                                    HeaderValue::from_str(&app.nombre).unwrap()
+                                match get_payload(&token) {
+                                    Ok(token_payload) => {
+                                        // Validate query to execute
+                                        let validated_app = validate_operation(
+                                            &token_payload.iss,
+                                            query_string,
+                                            file_path.clone()
+                                        );
+                                        match validated_app {
+                                            Ok(app) => {
+                                                req.supergraph_request
+                                                    .headers_mut()
+                                                    .insert(
+                                                        "app_name",
+                                                        HeaderValue::from_str(&app.nombre).unwrap()
+                                                    );
+
+                                                req.supergraph_request
+                                                    .headers_mut()
+                                                    .insert(
+                                                        "user_id",
+                                                        HeaderValue::from_str(
+                                                            &token_payload._id
+                                                        ).unwrap()
+                                                    );
+                                            }
+                                            Err(err) => {
+                                                res = error_response(
+                                                    err,
+                                                    StatusCode::UNAUTHORIZED,
+                                                    "UNAUTHORIZED",
+                                                    &req
                                                 );
-                                        }
-                                        Err(err) => {
-                                            res = error_response(
-                                                err,
-                                                StatusCode::UNAUTHORIZED,
-                                                "UNAUTHORIZED",
-                                                &req
-                                            );
+                                            }
                                         }
                                     }
-                                    //Get token Payload 2
-                                    if let Ok(token_payload) = get_payload(&app_payload._id) {
-                                        req.supergraph_request
-                                            .headers_mut()
-                                            .insert(
-                                                "authorization",
-                                                HeaderValue::from_str(&app_payload._id).unwrap()
-                                            );
-
-                                        req.supergraph_request
-                                            .headers_mut()
-                                            .insert(
-                                                "user_id",
-                                                HeaderValue::from_str(&token_payload._id).unwrap()
-                                            );
-                                    } else {
+                                    Err(_err) => {
+                                        let error_message = format!("Token de acceso no válido: {}", _err);
                                         res = error_response(
-                                            "Error al obtener access Token",
+                                            &error_message,
                                             StatusCode::UNAUTHORIZED,
                                             "UNAUTHORIZED",
                                             &req
                                         );
                                     }
-                                } else {
-                                    res = error_response(
-                                        "Error al obtener app Token",
-                                        StatusCode::UNAUTHORIZED,
-                                        "UNAUTHORIZED",
-                                        &req
-                                    );
                                 }
                             }
                             Err(_err) => {
