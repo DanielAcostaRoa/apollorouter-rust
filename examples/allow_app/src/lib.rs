@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use base64::decode;
 use apollo_router::graphql;
 use apollo_router::services::supergraph;
+
+use base64::decode;
+use http::StatusCode;
 use serde::Deserialize;
 use schemars::JsonSchema;
-use http::StatusCode;
 
 #[warn(dead_code)]
 #[derive(Deserialize, JsonSchema, Clone)]
@@ -83,23 +84,26 @@ pub mod plugin_functions {
         let token_base_64: Vec<&str> = token.split('.').collect();
 
         // Decode payload from jwt
-        match decode(token_base_64[1]) {
-            Ok(decoded_bytes) => {
-                let payload = String::from_utf8(decoded_bytes).expect(
-                    "Error al decodificar payload de access Token"
-                );
-
-                // Cast to Payload
-                if let Ok(payload_data) = serde_json::from_str::<Payload>(&payload) {
-                    return Ok(payload_data.clone());
-                } else {
-                    return Err("Error al obtener payload de access Token");
+        match token_base_64.get(1) {
+            Some(token_payload) => {
+                match decode(token_payload) {
+                    Ok(decoded_bytes) => {
+                        match String::from_utf8(decoded_bytes) {
+                            Ok(payload) => {
+                                // Cast to Payload
+                                if let Ok(payload_data) = serde_json::from_str::<Payload>(&payload) {
+                                    return Ok(payload_data.clone());
+                                } else {
+                                    return Err("El formato es incorrecto");
+                                }
+                            }
+                            Err(_err) => Err("No se pudo decodificar el payload del token"),
+                        }
+                    }
+                    Err(_err) => Err("No se pudo decodificar el token."),
                 }
             }
-            Err(_err) => {
-                eprintln!("{}", _err);
-                return Err("Error al decodificar access Token");
-            }
+            None => Err("El formato es incorrecto"),
         }
     }
 }
