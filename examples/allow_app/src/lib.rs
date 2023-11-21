@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use base64::decode;
 use apollo_router::graphql;
 use apollo_router::services::supergraph;
 use serde::Deserialize;
@@ -16,6 +17,13 @@ pub struct AppConfig {
 
 pub mod plugin_functions {
     use super::*;
+
+    #[warn(dead_code)]
+    #[derive(Debug, serde::Deserialize, Clone)]
+    pub struct Payload {
+        pub _id: String,
+        pub iss: String,
+    }
 
     pub fn get_operation_name(query_string: &str) -> String {
         let ops: Vec<&str> = query_string.split('{').collect();
@@ -68,6 +76,30 @@ pub mod plugin_functions {
             Ok(app.clone())
         } else {
             Err("Aplicación no registrada")
+        }
+    }
+
+    pub fn get_payload(token: &str) -> Result<Payload, &'static str> {
+        let token_base_64: Vec<&str> = token.split('.').collect();
+
+        // Decode payload from jwt
+        match decode(token_base_64[1]) {
+            Ok(decoded_bytes) => {
+                let payload = String::from_utf8(decoded_bytes).expect(
+                    "Error al decodificar payload de access Token"
+                );
+
+                // Cast to Payload
+                if let Ok(payload_data) = serde_json::from_str::<Payload>(&payload) {
+                    return Ok(payload_data.clone());
+                } else {
+                    return Err("Error al obtener payload de access Token");
+                }
+            }
+            Err(_err) => {
+                eprintln!("{}", _err);
+                return Err("Error al decodificar access Token");
+            }
         }
     }
 }
