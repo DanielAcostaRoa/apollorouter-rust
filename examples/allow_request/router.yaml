@@ -16,3 +16,5 @@ headers:
 plugins:
   auth.allow_request:
     header: "Authorization"
+    path: "allowedApps.json"
+    

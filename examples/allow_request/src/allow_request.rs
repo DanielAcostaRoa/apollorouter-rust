@@ -1,4 +1,5 @@
 use std::ops::ControlFlow;
+use std::path::PathBuf;
 
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::PluginInit;
@@ -6,7 +7,6 @@ use apollo_router::plugin::Plugin;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 use http::StatusCode;
-use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -15,15 +15,19 @@ use tower::ServiceExt;
 
 use acme_router::plugin_functions::validate_operation;
 use acme_router::plugin_functions::error_response;
+use acme_router::plugin_functions::insert_header;
 use acme_router::plugin_functions::get_payload;
+use acme_router::plugin_functions::get_app;
 
 #[derive(Deserialize, JsonSchema)]
 struct AllowRequestConfig {
     header: String,
+    path: String,
 }
 
 struct AllowRequest {
     header: String,
+    file_path: PathBuf,
 }
 
 #[async_trait::async_trait]
@@ -31,24 +35,26 @@ impl Plugin for AllowRequest {
     type Config = AllowRequestConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let AllowRequestConfig { header } = init.config;
+        let AllowRequestConfig { path, header } = init.config;
+        let file_path = PathBuf::from(path.as_str());
 
         Ok(Self {
+            file_path,
             header,
         })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let header_key = self.header.clone();
+        let file_path = self.file_path.clone();
 
         let handler = move |mut req: supergraph::Request| {
             let mut res = None;
-            //Get query from the body
-            let query = &req.supergraph_request.body().query;
 
-            match query {
+            //Get query from the body
+            match &req.supergraph_request.body().query {
                 Some(query_string) => {
-                    // First it is checked if the request has the Authorization header
+                    // Check if the request has the Authorization header
                     if !req.supergraph_request.headers().contains_key(&header_key) {
                         res = error_response(
                             "No se ha recibido el encabezado de autorización",
@@ -68,20 +74,34 @@ impl Plugin for AllowRequest {
                             Ok(token) => {
                                 //Get token Payload
                                 match get_payload(&token) {
-                                    Ok(token_payload) => {
+                                    Ok(payload) => {
                                         // Validate query to execute
-                                        match
-                                            validate_operation(&token_payload.claims, query_string)
-                                        {
+                                        match validate_operation(&payload.claims, query_string) {
                                             Ok(_query) => {
-                                                req.supergraph_request
-                                                    .headers_mut()
-                                                    .insert(
-                                                        "user_id",
-                                                        HeaderValue::from_str(
-                                                            &token_payload._id
-                                                        ).unwrap()
-                                                    );
+                                                match get_app(&payload.iss, file_path.clone()) {
+                                                    Ok(app) => {
+                                                        insert_header(
+                                                            &mut req,
+                                                            "user_id",
+                                                            &payload._id
+                                                        );
+                                                        insert_header(&mut req, "app_id", &app._id);
+                                                        insert_header(&mut req, "app_name", &app.name);
+                                                        insert_header(
+                                                            &mut req,
+                                                            "app_url",
+                                                            &app.url
+                                                        );
+                                                    }
+                                                    Err(err) => {
+                                                        res = error_response(
+                                                            err,
+                                                            StatusCode::UNAUTHORIZED,
+                                                            "UNAUTHORIZED",
+                                                            &req
+                                                        );
+                                                    }
+                                                }
                                             }
                                             Err(err) => {
                                                 res = error_response(
@@ -91,7 +111,7 @@ impl Plugin for AllowRequest {
                                                     &req
                                                 );
                                             }
-                                        }
+                                        };
                                     }
                                     Err(_err) => {
                                         let error_message =

@@ -11,6 +11,7 @@ services:
     volumes:
       - ./supergraph.graphql:/dist/schema/supergraph.graphql
       - ./router.yaml:/dist/config/router.yaml
+      - ./allowedApps.json:/dist/allowedApps.json
     command: [ "--dev", "-c", "config/router.yaml", "-s", "schema/supergraph.graphql", "--log", "info" ]
     environment:
       - APOLLO_OTEL_EXPORTER_HOST=collector
