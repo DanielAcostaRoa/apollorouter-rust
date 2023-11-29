@@ -1,8 +1,13 @@
+use std::path::PathBuf;
+
 use apollo_router::graphql;
 use apollo_router::services::supergraph;
 
 use base64::decode;
 use http::StatusCode;
+use http::HeaderValue;
+use serde::Deserialize;
+use schemars::JsonSchema;
 
 pub mod plugin_functions {
     use super::*;
@@ -13,6 +18,14 @@ pub mod plugin_functions {
         pub _id: String,
         pub iss: String,
         pub claims: Vec<String>,
+    }
+
+    #[warn(dead_code)]
+    #[derive(Deserialize, JsonSchema, Clone)]
+    pub struct AppConfig {
+        pub _id: String,
+        pub name: String,
+        pub url: String,
     }
 
     pub fn get_operation_name(query_string: &str) -> String {
@@ -84,5 +97,21 @@ pub mod plugin_functions {
             }
             None => Err("El formato es incorrecto"),
         }
+    }
+
+    pub fn get_app(app_id: &str, file_path: PathBuf) -> Result<AppConfig, &'static str> {
+        let apps: Vec<AppConfig> = serde_json
+            ::from_str(std::fs::read_to_string(file_path).unwrap().as_str())
+            .unwrap();
+
+        if let Some(app) = apps.iter().find(|app| app._id == app_id) {
+            Ok(app.clone())
+        } else {
+            Err("Aplicación no registrada")
+        }
+    }
+
+    pub fn insert_header(req: &mut supergraph::Request, key: &'static str, value: &str) {
+        req.supergraph_request.headers_mut().insert(key, HeaderValue::from_str(value).unwrap());
     }
 }

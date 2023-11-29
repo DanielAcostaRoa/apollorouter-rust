@@ -1,0 +1,12 @@
+[
+  {
+    "_id": "1234",
+    "name": "app1-Name",
+    "url": "http://my-url/"
+  },
+  {
+    "_id": "1233",
+    "name": "app2-Name",
+    "url": "http://my-url-2/"
+  }
+]
