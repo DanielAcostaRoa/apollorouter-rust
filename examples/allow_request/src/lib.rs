@@ -26,6 +26,7 @@ pub mod plugin_functions {
         pub _id: String,
         pub name: String,
         pub url: String,
+        pub permissions: Vec<String>,
     }
 
     pub fn get_operation_name(query_string: &str) -> String {
@@ -43,13 +44,7 @@ pub mod plugin_functions {
         return Some(
             supergraph::Response
                 ::error_builder()
-                .error(
-                    graphql::Error
-                        ::builder()
-                        .message(message.to_string())
-                        .extension_code(extension_code)
-                        .build()
-                )
+                .error(graphql::Error::builder().message(message.to_string()).extension_code(extension_code).build())
                 .status_code(status_code)
                 .context(req.context.clone())
                 .build()
@@ -58,14 +53,22 @@ pub mod plugin_functions {
     }
 
     pub fn validate_operation(
+        permissions: &Vec<String>,
         claims: &Vec<String>,
         query_string: &str
     ) -> Result<String, &'static str> {
+        let mut _allowed_query = false;
+
         // Get query to execute
         let operation_name = get_operation_name(query_string);
-        let query_is_allowed = claims.iter().any(|query| query == &operation_name);
 
-        if !query_is_allowed {
+        if claims[0] == "*" {
+            _allowed_query = permissions.iter().any(|query| query == &operation_name);
+        } else {
+            _allowed_query = claims.iter().any(|query| query == &operation_name);
+        }
+
+        if !_allowed_query {
             return Err("No tienes permisos para ejecutar esta acción");
         }
 
@@ -100,9 +103,7 @@ pub mod plugin_functions {
     }
 
     pub fn get_app(app_id: &str, file_path: PathBuf) -> Result<AppConfig, &'static str> {
-        let apps: Vec<AppConfig> = serde_json
-            ::from_str(std::fs::read_to_string(file_path).unwrap().as_str())
-            .unwrap();
+        let apps: Vec<AppConfig> = serde_json::from_str(std::fs::read_to_string(file_path).unwrap().as_str()).unwrap();
 
         if let Some(app) = apps.iter().find(|app| app._id == app_id) {
             Ok(app.clone())
