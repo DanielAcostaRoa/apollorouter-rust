@@ -18,4 +18,7 @@ plugins:
     header: "Authorization"
     path: "allowedApps.json"
     introspection: true
+rhai:
+  scripts: src
+  main: error_response.rhai
     
