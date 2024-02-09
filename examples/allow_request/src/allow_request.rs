@@ -14,7 +14,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use acme_router::plugin_functions::validate_operation;
-use acme_router::plugin_functions::get_operation_name;
+use acme_router::plugin_functions::get_operations_name;
 use acme_router::plugin_functions::error_response;
 use acme_router::plugin_functions::insert_header;
 use acme_router::plugin_functions::get_payload;
@@ -58,14 +58,14 @@ impl Plugin for AllowRequest {
 
             //Get query from the body
             if let Some(query_string) = &req.supergraph_request.body().query {
-                let mut operation_name = String::new();
+                let mut operations = Vec::new();
 
                 // Check if the introspection is enabled to allow query
                 if introspection {
-                    operation_name = get_operation_name(query_string);
+                    operations = get_operations_name(query_string);
                 }
 
-                if operation_name != "schema" {
+                if !operations.contains(&"__schema".to_string()) {
                     // Check if the request has the Authorization header
                     if !req.supergraph_request.headers().contains_key(&header_key) {
                         res = error_response(
