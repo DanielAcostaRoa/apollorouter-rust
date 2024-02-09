@@ -45,7 +45,6 @@ pub mod plugin_functions {
                             cst::Selection::Field(field) => {
                                 if let Some(name) = field.name() {
                                     operations.push(name.text().to_string());
-                                    println!("Operation: {}", name.text());
                                 }
                             }
                             _ => {
