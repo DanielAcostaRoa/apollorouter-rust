@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use apollo_router::graphql;
 use apollo_router::services::supergraph;
+use apollo_parser::{ cst, Parser };
 
 use base64::decode;
 use http::StatusCode;
@@ -29,10 +30,32 @@ pub mod plugin_functions {
         pub permissions: Vec<String>,
     }
 
-    pub fn get_operation_name(query_string: &str) -> String {
-        let ops: Vec<&str> = query_string.split('{').collect();
-        let op1: Vec<&str> = ops[1].split('(').collect();
-        op1[0].replace(|c: char| !c.is_alphanumeric(), "")
+    pub fn get_operations_name(query_string: &str) -> Vec<String> {
+        let mut operations = Vec::new();
+        let parser = Parser::new(query_string);
+        let cst = parser.parse();
+
+        let doc = cst.document();
+
+        for def in doc.definitions() {
+            if let cst::Definition::OperationDefinition(op_def) = def {
+                if let Some(selection_set) = op_def.selection_set() {
+                    for selection in selection_set.selections() {
+                        match selection {
+                            cst::Selection::Field(field) => {
+                                if let Some(name) = field.name() {
+                                    operations.push(name.text().to_string());
+                                }
+                            }
+                            _ => {
+                                operations.push("not_allowed".to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        operations
     }
 
     pub fn error_response(
@@ -56,23 +79,23 @@ pub mod plugin_functions {
         permissions: &Vec<String>,
         claims: &Vec<String>,
         query_string: &str
-    ) -> Result<String, &'static str> {
+    ) -> Result<Vec<String>, &'static str> {
         let mut _allowed_query = false;
 
         // Get query to execute
-        let operation_name = get_operation_name(query_string);
+        let operations = get_operations_name(query_string);
 
         if claims[0] == "*" {
-            _allowed_query = permissions.iter().any(|query| query == &operation_name);
+            _allowed_query = operations.iter().all(|operation| permissions.contains(operation));
         } else {
-            _allowed_query = claims.iter().any(|query| query == &operation_name);
+            _allowed_query = operations.iter().all(|operation| claims.contains(operation));
         }
 
         if !_allowed_query {
             return Err("No tienes permisos para ejecutar esta acción");
         }
 
-        Ok(operation_name)
+        Ok(operations)
     }
 
     pub fn get_payload(token: &str) -> Result<Payload, &'static str> {
