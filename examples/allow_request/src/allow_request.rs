@@ -14,9 +14,9 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use acme_router::plugin_functions::validate_operation;
-use acme_router::plugin_functions::get_operations_name;
 use acme_router::plugin_functions::error_response;
 use acme_router::plugin_functions::insert_header;
+use acme_router::plugin_functions::introspection;
 use acme_router::plugin_functions::get_payload;
 use acme_router::plugin_functions::get_app;
 
@@ -49,7 +49,7 @@ impl Plugin for AllowRequest {
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        let introspection = self.introspection.clone();
+        let introspection_cfg = self.introspection.clone();
         let file_path = self.file_path.clone();
         let header_key = self.header.clone();
 
@@ -58,78 +58,74 @@ impl Plugin for AllowRequest {
 
             //Get query from the body
             if let Some(query_string) = &req.supergraph_request.body().query {
-                let mut operations = Vec::new();
-
                 // Check if the introspection is enabled to allow query
-                if introspection {
-                    operations = get_operations_name(query_string);
-                }
-
-                if !operations.contains(&"__schema".to_string()) {
-                    // Check if the request has the Authorization header
-                    if !req.supergraph_request.headers().contains_key(&header_key) {
-                        res = error_response(
-                            "No se ha recibido el encabezado de autorización",
-                            StatusCode::UNAUTHORIZED,
-                            "AUTH_ERROR",
-                            &req
-                        );
-                    } else {
-                        // Get token from the Authorization header
-                        if
-                            let Ok(token) = req.supergraph_request
-                                .headers()
-                                .get("Authorization")
-                                .expect("No se pudo extraer el token de la petición")
-                                .to_str()
-                        {
-                            //Get token Payload
-                            match get_payload(&token) {
-                                Ok(payload) => {
-                                    if let Ok(app) = get_app(&payload.iss, file_path.clone()) {
-                                        // Validate query to execute
-                                        match validate_operation(&app.permissions, &payload.claims, query_string) {
-                                            Ok(_query) => {
-                                                insert_header(&mut req, "user_id", &payload._id);
-                                                insert_header(&mut req, "app_id", &app._id);
-                                                insert_header(&mut req, "app_name", &app.name);
-                                                insert_header(&mut req, "app_url", &app.url);
+                if introspection_cfg {
+                    if !introspection(query_string) {
+                        // Check if the request has the Authorization header
+                        if !req.supergraph_request.headers().contains_key(&header_key) {
+                            res = error_response(
+                                "No se ha recibido el encabezado de autorización",
+                                StatusCode::UNAUTHORIZED,
+                                "AUTH_ERROR",
+                                &req
+                            );
+                        } else {
+                            // Get token from the Authorization header
+                            if
+                                let Ok(token) = req.supergraph_request
+                                    .headers()
+                                    .get("Authorization")
+                                    .expect("No se pudo extraer el token de la petición")
+                                    .to_str()
+                            {
+                                //Get token Payload
+                                match get_payload(&token) {
+                                    Ok(payload) => {
+                                        if let Ok(app) = get_app(&payload.iss, file_path.clone()) {
+                                            // Validate query to execute
+                                            match validate_operation(&app.permissions, &payload.claims, query_string) {
+                                                Ok(_query) => {
+                                                    insert_header(&mut req, "user_id", &payload._id);
+                                                    insert_header(&mut req, "app_id", &app._id);
+                                                    insert_header(&mut req, "app_name", &app.name);
+                                                    insert_header(&mut req, "app_url", &app.url);
+                                                }
+                                                Err(err) => {
+                                                    res = error_response(
+                                                        err,
+                                                        StatusCode::UNAUTHORIZED,
+                                                        "UNAUTHORIZED",
+                                                        &req
+                                                    );
+                                                }
                                             }
-                                            Err(err) => {
-                                                res = error_response(
-                                                    err,
-                                                    StatusCode::UNAUTHORIZED,
-                                                    "UNAUTHORIZED",
-                                                    &req
-                                                );
-                                            }
+                                        } else {
+                                            res = error_response(
+                                                "Aplicación no registrada",
+                                                StatusCode::UNAUTHORIZED,
+                                                "UNAUTHORIZED",
+                                                &req
+                                            );
                                         }
-                                    } else {
+                                    }
+                                    Err(_err) => {
+                                        let error_message = format!("Token de acceso no válido: {}", _err);
                                         res = error_response(
-                                            "Aplicación no registrada",
+                                            &error_message,
                                             StatusCode::UNAUTHORIZED,
                                             "UNAUTHORIZED",
                                             &req
                                         );
                                     }
                                 }
-                                Err(_err) => {
-                                    let error_message = format!("Token de acceso no válido: {}", _err);
-                                    res = error_response(
-                                        &error_message,
-                                        StatusCode::UNAUTHORIZED,
-                                        "UNAUTHORIZED",
-                                        &req
-                                    );
-                                }
+                            } else {
+                                res = error_response(
+                                    "Error al validar access Token",
+                                    StatusCode::UNAUTHORIZED,
+                                    "UNAUTHORIZED",
+                                    &req
+                                );
                             }
-                        } else {
-                            res = error_response(
-                                "Error al validar access Token",
-                                StatusCode::UNAUTHORIZED,
-                                "UNAUTHORIZED",
-                                &req
-                            );
                         }
                     }
                 }

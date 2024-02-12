@@ -30,6 +30,33 @@ pub mod plugin_functions {
         pub permissions: Vec<String>,
     }
 
+    pub fn introspection(query_string: &str) -> bool {
+        let parser = Parser::new(query_string);
+        let cst = parser.parse();
+
+        let doc = cst.document();
+
+        for def in doc.definitions() {
+            if let cst::Definition::OperationDefinition(op_def) = def {
+                if let Some(selection_set) = op_def.selection_set() {
+                    for selection in selection_set.selections() {
+                        match selection {
+                            cst::Selection::Field(field) => {
+                                if let Some(name) = field.name() {
+                                    if name.text() == "__schema" {
+                                        return true;
+                                    }
+                                }
+                            }
+                            _selection => {}
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub fn get_operations_name(query_string: &str) -> Vec<String> {
         let mut operations = Vec::new();
         let parser = Parser::new(query_string);
