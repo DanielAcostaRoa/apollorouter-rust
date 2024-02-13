@@ -78,19 +78,6 @@ pub mod plugin_functions {
                         }
                     }
                 }
-            } else if let cst::Definition::FragmentDefinition(fragment) = def {
-                if let Some(selection_set) = fragment.selection_set() {
-                    for selection in selection_set.selections() {
-                        match selection {
-                            cst::Selection::Field(field) => {
-                                if let Some(name) = field.name() {
-                                    operations.push(name.text().to_string());
-                                }
-                            }
-                            _selection => {}
-                        }
-                    }
-                }
             }
         }
         operations
