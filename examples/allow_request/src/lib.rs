@@ -123,6 +123,48 @@ pub mod plugin_functions {
         Ok(operations)
     }
 
+    pub fn verify_request(
+        file_path: PathBuf,
+        query_string: &str,
+        req: &mut supergraph::Request
+    ) -> Result<(), &'static str> {
+        if
+            let Ok(token) = req.supergraph_request
+                .headers()
+                .clone()
+                .get("Authorization")
+                .expect("No se pudo extraer el Token de la petición")
+                .to_str()
+        {
+            match get_payload(&token) {
+                Ok(payload) => {
+                    if let Ok(app) = get_app(&payload.iss, file_path.clone()) {
+                        match validate_operation(&app.permissions, &payload.claims, query_string) {
+                            Ok(query) => {
+                                insert_header(req, "user_id", &payload._id);
+                                insert_header(req, "app_id", &app._id);
+                                insert_header(req, "app_name", &app.name);
+                                insert_header(req, "app_url", &app.url);
+                                insert_header(req, "permissions", &query.join(","));
+                                Ok(())
+                            }
+                            Err(err) => {
+                                return Err(err);
+                            }
+                        }
+                    } else {
+                        return Err("Aplicación no registrada");
+                    }
+                }
+                Err(_err) => {
+                    return Err("Token de acceso no válido");
+                }
+            }
+        } else {
+            return Err("Error al validar access Token");
+        }
+    }
+
     pub fn get_payload(token: &str) -> Result<Payload, &'static str> {
         let token_base_64: Vec<&str> = token.split('.').collect();
 

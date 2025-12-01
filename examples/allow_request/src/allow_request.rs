@@ -13,12 +13,9 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use acme_router::plugin_functions::validate_operation;
+use acme_router::plugin_functions::verify_request;
 use acme_router::plugin_functions::error_response;
-use acme_router::plugin_functions::insert_header;
 use acme_router::plugin_functions::introspection;
-use acme_router::plugin_functions::get_payload;
-use acme_router::plugin_functions::get_app;
 
 #[derive(Deserialize, JsonSchema)]
 struct AllowRequestConfig {
@@ -56,75 +53,27 @@ impl Plugin for AllowRequest {
         let handler = move |mut req: supergraph::Request| {
             let mut res = None;
 
-            //Get query from the body
-            if let Some(query_string) = &req.supergraph_request.body().query {
-                // Check if the introspection is enabled to allow query
+            let query_opt = req.supergraph_request.body().query.clone();
+            if let Some(ref query_string) = query_opt {
                 if introspection_cfg {
                     if !introspection(query_string) {
-                        // Check if the request has the Authorization header
-                        if !req.supergraph_request.headers().contains_key(&header_key) {
+                        if !req.supergraph_request.headers().clone().contains_key(&header_key) {
                             res = error_response(
                                 "No se ha recibido el encabezado de autorización",
                                 StatusCode::UNAUTHORIZED,
-                                "AUTH_ERROR",
+                                "UNAUTHORIZED",
                                 &req
                             );
                         } else {
-                            // Get token from the Authorization header
-                            if
-                                let Ok(token) = req.supergraph_request
-                                    .headers()
-                                    .get("Authorization")
-                                    .expect("No se pudo extraer el token de la petición")
-                                    .to_str()
-                            {
-                                //Get token Payload
-                                match get_payload(&token) {
-                                    Ok(payload) => {
-                                        if let Ok(app) = get_app(&payload.iss, file_path.clone()) {
-                                            // Validate query to execute
-                                            match validate_operation(&app.permissions, &payload.claims, query_string) {
-                                                Ok(_query) => {
-                                                    insert_header(&mut req, "user_id", &payload._id);
-                                                    insert_header(&mut req, "app_id", &app._id);
-                                                    insert_header(&mut req, "app_name", &app.name);
-                                                    insert_header(&mut req, "app_url", &app.url);
-                                                }
-                                                Err(err) => {
-                                                    res = error_response(
-                                                        err,
-                                                        StatusCode::UNAUTHORIZED,
-                                                        "UNAUTHORIZED",
-                                                        &req
-                                                    );
-                                                }
-                                            }
-                                        } else {
-                                            res = error_response(
-                                                "Aplicación no registrada",
-                                                StatusCode::UNAUTHORIZED,
-                                                "UNAUTHORIZED",
-                                                &req
-                                            );
-                                        }
-                                    }
-                                    Err(_err) => {
-                                        let error_message = format!("Token de acceso no válido: {}", _err);
-                                        res = error_response(
-                                            &error_message,
-                                            StatusCode::UNAUTHORIZED,
-                                            "UNAUTHORIZED",
-                                            &req
-                                        );
+                            match verify_request(file_path.clone(), query_string, &mut req) {
+                                Ok(_) => {}
+                                Err(err) => {
+                                    if err.contains("Token") {
+                                        res = error_response(err, StatusCode::UNAUTHORIZED, "UNAUTHORIZED", &req);
+                                    } else {
+                                        res = error_response(err, StatusCode::FORBIDDEN, "FORBIDDEN", &req);
                                     }
                                 }
-                            } else {
-                                res = error_response(
-                                    "Error al validar access Token",
-                                    StatusCode::UNAUTHORIZED,
-                                    "UNAUTHORIZED",
-                                    &req
-                                );
                             }
                         }
                     }
