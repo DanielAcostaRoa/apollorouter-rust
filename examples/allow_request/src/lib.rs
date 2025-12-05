@@ -1,14 +1,15 @@
 use std::path::PathBuf;
+use http::HeaderMap;
 
 use apollo_router::graphql;
 use apollo_router::services::supergraph;
 use apollo_parser::{ cst, Parser };
 
-use base64::decode;
 use http::StatusCode;
 use http::HeaderValue;
 use serde::Deserialize;
 use schemars::JsonSchema;
+use jsonwebtoken::{ decode, Algorithm, DecodingKey, Validation };
 
 pub mod functions {
     use super::*;
@@ -83,25 +84,6 @@ pub mod functions {
         operations
     }
 
-    pub fn get_auth_token(headers: &http::HeaderMap) -> Result<String, &'static str> {
-        let header = match headers.get("Authorization") {
-            Some(v) => v,
-            None => {
-                return Err("No se ha proporcionado el encabezado de autorización");
-            }
-        };
-        let auth_header = match std::str::from_utf8(header.as_bytes()) {
-            Ok(v) => v,
-            Err(_) => {
-                return Err("Error al validar el encabezado de autorización");
-            }
-        };
-        if !auth_header.starts_with("Bearer ") {
-            return Err("Token de acceso no válido no válido");
-        }
-        Ok(auth_header.trim_start_matches("Bearer ").to_string())
-    }
-
     pub fn error_response(
         message: &str,
         status_code: StatusCode,
@@ -142,75 +124,6 @@ pub mod functions {
         Ok(operations)
     }
 
-    pub fn verify_request(
-        file_path: PathBuf,
-        query_string: &str,
-        req: &mut supergraph::Request
-    ) -> Result<(), &'static str> {
-        if
-            let Ok(token) = req.supergraph_request
-                .headers()
-                .clone()
-                .get("Authorization")
-                .expect("No se pudo extraer el Token de la petición")
-                .to_str()
-        {
-            match get_payload(&token) {
-                Ok(payload) => {
-                    if let Ok(app) = get_app(&payload.iss, file_path.clone()) {
-                        match validate_operation(&app.permissions, &payload.claims, query_string) {
-                            Ok(query) => {
-                                insert_header(req, "user_id", &payload._id);
-                                insert_header(req, "app_id", &app._id);
-                                insert_header(req, "app_name", &app.name);
-                                insert_header(req, "app_url", &app.url);
-                                insert_header(req, "permissions", &query.join(","));
-                                Ok(())
-                            }
-                            Err(err) => {
-                                return Err(err);
-                            }
-                        }
-                    } else {
-                        return Err("Aplicación no registrada");
-                    }
-                }
-                Err(_err) => {
-                    return Err("Token de acceso no válido");
-                }
-            }
-        } else {
-            return Err("Error al validar access Token");
-        }
-    }
-
-    pub fn get_payload(token: &str) -> Result<Payload, &'static str> {
-        let token_base_64: Vec<&str> = token.split('.').collect();
-
-        // Decode payload from jwt
-        match token_base_64.get(1) {
-            Some(token_payload) => {
-                match decode(token_payload) {
-                    Ok(decoded_bytes) => {
-                        match String::from_utf8(decoded_bytes) {
-                            Ok(payload) => {
-                                // Cast to Payload
-                                if let Ok(payload_data) = serde_json::from_str::<Payload>(&payload) {
-                                    return Ok(payload_data.clone());
-                                } else {
-                                    return Err("El formato es incorrecto");
-                                }
-                            }
-                            Err(_err) => Err("No se pudo decodificar el payload del token"),
-                        }
-                    }
-                    Err(_err) => Err("No se pudo decodificar el token."),
-                }
-            }
-            None => Err("El formato es incorrecto"),
-        }
-    }
-
     pub fn get_app(app_id: &str, file_path: PathBuf) -> Result<AppConfig, &'static str> {
         let apps: Vec<AppConfig> = serde_json::from_str(std::fs::read_to_string(file_path).unwrap().as_str()).unwrap();
 
@@ -223,5 +136,64 @@ pub mod functions {
 
     pub fn insert_header(req: &mut supergraph::Request, key: &'static str, value: &str) {
         req.supergraph_request.headers_mut().insert(key, HeaderValue::from_str(value).unwrap());
+    }
+
+    pub fn get_auth_token(headers: &http::HeaderMap) -> Result<String, &'static str> {
+        let header = match headers.get("Authorization") {
+            Some(v) => v,
+            None => {
+                return Err("No se ha proporcionado el encabezado de autorización");
+            }
+        };
+        let auth_header = match std::str::from_utf8(header.as_bytes()) {
+            Ok(v) => v,
+            Err(_) => {
+                return Err("Error al validar el encabezado de autorización");
+            }
+        };
+        if !auth_header.starts_with("Bearer ") {
+            return Err("Token de acceso no válido no válido");
+        }
+        Ok(auth_header.trim_start_matches("Bearer ").to_string())
+    }
+
+    pub fn validate_jwt_rsa(token: &str, public_key_path: &PathBuf) -> Result<Payload, &'static str> {
+        let public_key_pem = std::fs::read(public_key_path).map_err(|_| "Error al leer clave pública")?;
+
+        let decoding_key = DecodingKey::from_rsa_pem(&public_key_pem).map_err(
+            |_| "Error al decodificar clave pública"
+        )?;
+
+        let validation = Validation::new(Algorithm::RS256);
+
+        let token_data = match decode::<Payload>(token, &decoding_key, &validation) {
+            Ok(data) => data,
+            Err(err) => {
+                if err.to_string() == "ExpiredSignature" {
+                    return Err("Su sesión ha expirado");
+                }
+                return Err("Token de acceso no válido");
+            }
+        };
+
+        Ok(token_data.claims)
+    }
+
+    pub fn authenticate(headers: &HeaderMap, public_key_path: &PathBuf) -> Result<Payload, &'static str> {
+        let jwt = match get_auth_token(headers) {
+            Ok(token) => token,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
+        let payload = match validate_jwt_rsa(&jwt, public_key_path) {
+            Ok(data) => data,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
+        Ok(payload)
     }
 }

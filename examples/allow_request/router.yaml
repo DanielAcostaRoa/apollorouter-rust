@@ -17,6 +17,7 @@ plugins:
   auth.allow_request:
     header: "Authorization"
     path: "allowedApps.json"
+    public_key_path: "public_key.pem"
     introspection: true
 rhai:
   scripts: src

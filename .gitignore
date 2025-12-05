@@ -4,3 +4,5 @@ acme_router
 
 # IDE - VSCode
 .vscode/settings.json
+**/*.graphql
+**/*.pem
