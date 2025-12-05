@@ -14,6 +14,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use acme_router::functions::authenticate;
+use acme_router::functions::authorize;
 use acme_router::functions::error_response;
 use acme_router::functions::introspection;
 
@@ -63,15 +64,21 @@ impl Plugin for AllowRequest {
                 if let Some(ref query_string) = query_opt {
                     if introspection_cfg {
                         if !introspection(query_string) {
-                            match authenticate(&req.supergraph_request.headers().clone(), &public_key_path.clone()) {
+                            let data = match
+                                authenticate(&req.supergraph_request.headers().clone(), &public_key_path.clone())
+                            {
                                 Ok(data) => {
-                                    println!("Token data: {:#?}", data);
+                                    match authorize(file_path.clone(), query_string, &data, &mut req) {
+                                        Ok(_) => {}
+                                        Err(error) => {
+                                            res = error_response(&error, StatusCode::FORBIDDEN, "FORBIDDEN", &req);
+                                        }
+                                    }
                                 }
                                 Err(error) => {
-                                    println!("Error al obtener el token: {}", error);
                                     res = error_response(&error, StatusCode::UNAUTHORIZED, "UNAUTHORIZED", &req);
                                 }
-                            }
+                            };
                         }
                     }
                 } else {

@@ -196,4 +196,32 @@ pub mod functions {
 
         Ok(payload)
     }
+
+    pub fn authorize(
+        file: PathBuf,
+        query: &str,
+        payload: &Payload,
+        req: &mut supergraph::Request
+    ) -> Result<(), &'static str> {
+        let app = match get_app(&payload.iss, file.clone()) {
+            Ok(app) => app,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+
+        match validate_operation(&app.permissions, &payload.claims, query) {
+            Ok(query) => {
+                insert_header(req, "user_id", &payload._id);
+                insert_header(req, "app_id", &app._id);
+                insert_header(req, "app_name", &app.name);
+                insert_header(req, "app_url", &app.url);
+                insert_header(req, "permissions", &query.join(","));
+                Ok(())
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        }
+    }
 }
