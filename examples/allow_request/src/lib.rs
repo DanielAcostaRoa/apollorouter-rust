@@ -10,7 +10,7 @@ use http::HeaderValue;
 use serde::Deserialize;
 use schemars::JsonSchema;
 
-pub mod plugin_functions {
+pub mod functions {
     use super::*;
 
     #[warn(dead_code)]
@@ -81,6 +81,25 @@ pub mod plugin_functions {
             }
         }
         operations
+    }
+
+    pub fn get_auth_token(headers: &http::HeaderMap) -> Result<String, &'static str> {
+        let header = match headers.get("Authorization") {
+            Some(v) => v,
+            None => {
+                return Err("No se ha proporcionado el encabezado de autorización");
+            }
+        };
+        let auth_header = match std::str::from_utf8(header.as_bytes()) {
+            Ok(v) => v,
+            Err(_) => {
+                return Err("Error al validar el encabezado de autorización");
+            }
+        };
+        if !auth_header.starts_with("Bearer ") {
+            return Err("Token de acceso no válido no válido");
+        }
+        Ok(auth_header.trim_start_matches("Bearer ").to_string())
     }
 
     pub fn error_response(

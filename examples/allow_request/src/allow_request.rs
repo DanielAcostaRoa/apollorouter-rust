@@ -13,9 +13,9 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use acme_router::plugin_functions::verify_request;
-use acme_router::plugin_functions::error_response;
-use acme_router::plugin_functions::introspection;
+use acme_router::functions::get_auth_token;
+use acme_router::functions::error_response;
+use acme_router::functions::introspection;
 
 #[derive(Deserialize, JsonSchema)]
 struct AllowRequestConfig {
@@ -52,42 +52,33 @@ impl Plugin for AllowRequest {
 
         let handler = move |mut req: supergraph::Request| {
             let mut res = None;
+            let introspection_cfg = introspection_cfg.clone();
 
-            let query_opt = req.supergraph_request.body().query.clone();
-            if let Some(ref query_string) = query_opt {
-                if introspection_cfg {
-                    if !introspection(query_string) {
-                        if !req.supergraph_request.headers().clone().contains_key(&header_key) {
-                            res = error_response(
-                                "No se ha recibido el encabezado de autorización",
-                                StatusCode::UNAUTHORIZED,
-                                "UNAUTHORIZED",
-                                &req
-                            );
-                        } else {
-                            match verify_request(file_path.clone(), query_string, &mut req) {
-                                Ok(_) => {}
-                                Err(err) => {
-                                    if err.contains("Token") {
-                                        res = error_response(err, StatusCode::UNAUTHORIZED, "UNAUTHORIZED", &req);
-                                    } else {
-                                        res = error_response(err, StatusCode::FORBIDDEN, "FORBIDDEN", &req);
-                                    }
+            async move {
+                let query_opt = req.supergraph_request.body().query.clone();
+                if let Some(ref query_string) = query_opt {
+                    if introspection_cfg {
+                        if !introspection(query_string) {
+                            match get_auth_token(&req.supergraph_request.headers().clone()) {
+                                Ok(token) => {
+                                    println!("Token obtenido: {}", token);
+                                }
+                                Err(err_msg) => {
+                                    println!("Error al obtener el token: {}", err_msg);
+                                    res = error_response(&err_msg, StatusCode::UNAUTHORIZED, "UNAUTHORIZED", &req);
                                 }
                             }
                         }
                     }
+                } else {
+                    res = error_response(
+                        "Debes proporcionar una consulta válida",
+                        StatusCode::BAD_REQUEST,
+                        "GRAPHQL_ERROR",
+                        &req
+                    );
                 }
-            } else {
-                res = error_response(
-                    "La consulta no puede estar vacía",
-                    StatusCode::BAD_REQUEST,
-                    "GRAPHQL_ERROR",
-                    &req
-                );
-            }
 
-            async {
                 match res {
                     Some(res) => Ok(ControlFlow::Break(res)),
                     None => Ok(ControlFlow::Continue(req)),
